@@ -1,74 +1,121 @@
-# CodeAlpha_tasks
+# 🚀 Artificial Intelligence Internship Projects
 
-# 🎯 Real-Time Object Detection and Tracking System
+This repository contains AI-based projects developed during my Artificial Intelligence Internship using Python, Natural Language Processing (NLP), Machine Learning, and Computer Vision techniques.
 
-A real-time computer vision project that performs **object detection** and **object tracking** using **OpenCV** and a pre-trained deep learning model such as **YOLO**.
-The system detects objects from webcam/video input, draws bounding boxes around them, and assigns unique tracking IDs to track object movement across frames.
+These projects demonstrate practical implementation of real-world AI applications including object detection, tracking, and intelligent chatbot systems.
 
 ---
 
-# 📌 Features
+# 📌 Projects Included
+
+# 1️⃣ Real-Time Object Detection and Tracking
+
+## 📖 Overview
+
+A real-time computer vision system that performs object detection and tracking using OpenCV and a pre-trained YOLO model.
+
+The application processes webcam/video input, detects multiple objects, draws bounding boxes, and assigns unique tracking IDs in real time.
+
+---
+
+## ✨ Features
 
 ✅ Real-time webcam/video processing
-✅ Object detection using YOLO / Faster R-CNN
+✅ Object detection using YOLO
 ✅ Bounding box visualization
-✅ Object tracking with unique IDs
-✅ Real-time frame display using OpenCV
-✅ Supports multiple objects simultaneously
+✅ Multi-object tracking using SORT / Deep SORT
+✅ Real-time tracking IDs
+✅ Supports multiple object classes simultaneously
 
 ---
 
-# 🛠️ Technologies Used
+## 🛠️ Technologies Used
 
 * Python
 * OpenCV
 * NumPy
-* YOLO (You Only Look Once)
-* SORT / Deep SORT Tracking Algorithm
-* Machine Learning & Computer Vision
+* YOLO
+* SORT / Deep SORT
+* Computer Vision
+
+---
+
+# 2️⃣ FAQ Chatbot using NLP
+
+## 📖 Overview
+
+An intelligent FAQ chatbot system developed using Natural Language Processing (NLP) and Machine Learning techniques.
+
+The chatbot understands user questions, calculates similarity using TF-IDF and cosine similarity, and provides the most relevant answer from the FAQ database.
+
+---
+
+## ✨ Features
+
+✅ NLP-based question understanding
+✅ TF-IDF Vectorization
+✅ Cosine similarity matching
+✅ Text preprocessing & lemmatization
+✅ Interactive command-line chatbot
+✅ Confidence score display
+✅ Conversation history tracking
+✅ Fallback response handling
+
+---
+
+## 🛠️ Technologies Used
+
+* Python
+* NLTK
+* Scikit-learn
+* NumPy
+* TF-IDF Vectorizer
+* Cosine Similarity
 
 ---
 
 # 📂 Project Structure
 
 ```bash
-├── models/               # Pre-trained model files
-├── videos/               # Input videos
-├── outputs/              # Output processed videos
-├── main.py               # Main execution file
-├── tracker.py            # Object tracking logic
-├── requirements.txt      # Required libraries
+├── Object_Detection_Tracking/
+│   ├── main.py
+│   ├── tracker.py
+│   ├── models/
+│   └── outputs/
+│
+├── FAQ_Chatbot/
+│   ├── chatbot.py
+│
 └── README.md
 ```
 
 ---
 
-# 🚀 Installation
+# ⚙️ Installation
 
 ## 1️⃣ Clone the Repository
 
 ```bash
 git clone https://github.com/saqiali213ali-gi/CodeAlpha_tasks
-cd object-detection-tracking
 ```
 
 ## 2️⃣ Install Required Libraries
 
 ```bash
-pip install -r requirements.txt
+pip install opencv-python numpy nltk scikit-learn
 ```
 
 ---
 
-# ▶️ Run the Project
+# ▶️ Run the Projects
 
-## Webcam Input
+# 🔹 Run Object Detection & Tracking
 
 ```bash
 python main.py
 ```
 
-## Video File Input
+For video file input:
 
 ```bash
 python main.py --video sample.mp4
@@ -76,77 +123,65 @@ python main.py --video sample.mp4
 
 ---
 
-# 🧠 How It Works
-
-1. OpenCV captures video frames from webcam or video file.
-2. YOLO detects objects in each frame.
-3. Bounding boxes and class labels are generated.
-4. SORT / Deep SORT assigns tracking IDs.
-5. Tracked objects are displayed in real time.
-
----
-
-# 📸 Output Preview
-
-* Detected objects highlighted with bounding boxes
-* Labels showing object class names
-* Unique tracking IDs for each object
-
-Example:
+# 🔹 Run FAQ Chatbot
 
 ```bash
-Person ID: 1
-Car ID: 2
-Bike ID: 3
+python chatbot.py
 ```
 
 ---
 
-# 📊 Applications
+# 🧠 How the FAQ Chatbot Works
 
-* Smart Surveillance Systems
+1. User enters a question.
+2. Text is preprocessed using NLP techniques.
+3. TF-IDF converts text into numerical vectors.
+4. Cosine similarity compares user input with stored FAQs.
+5. The chatbot returns the most relevant answer.
+
+---
+
+# 🎯 Applications
+
+## Object Detection & Tracking
+
+* Smart Surveillance
 * Traffic Monitoring
-* Autonomous Vehicles
 * Security Systems
-* Crowd Analysis
-* Retail Analytics
+* Autonomous Systems
+
+## FAQ Chatbot
+
+* Customer Support Automation
+* Virtual Assistants
+* AI Help Centers
+* Educational Chatbots
 
 ---
 
 # 📚 Learning Outcomes
 
-Through this project, I learned:
+Through these projects, I learned:
 
-* Real-time video processing
-* Object detection techniques
-* Deep learning model integration
-* Multi-object tracking
-* Computer vision fundamentals
-* OpenCV implementation
-
----
-
-# 🤝 Contributing
-
-Contributions, suggestions, and improvements are welcome.
-
-Feel free to fork this repository and submit a pull request.
+* Artificial Intelligence Fundamentals
+* Natural Language Processing (NLP)
+* Computer Vision
+* Real-Time Video Processing
+* Object Detection & Tracking
+* Text Similarity Algorithms
+* AI-based Problem Solving
+* Python AI Development
 
 ---
 
 # 📄 License
 
-This project is for educational and learning purposes.
+This repository is for educational and internship purposes.
 
 ---
 
 # 👨‍💻 Author
 
-Developed by **Muhammad_Saqib**
+Developed by **Muhammad Saqib**
 
-Passionate about AI, Machine Learning, and Computer Vision 🚀
-
-
-
-
-
+Artificial Intelligence Enthusiast 🚀
