@@ -48,7 +48,7 @@ The system detects objects from webcam/video input, draws bounding boxes around 
 ## 1️⃣ Clone the Repository
 
 ```bash
-git clone https://github.com/your-username/object-detection-tracking.git
+git clone https://github.com/saqiali213ali-gi/CodeAlpha_tasks
 cd object-detection-tracking
 ```
 
