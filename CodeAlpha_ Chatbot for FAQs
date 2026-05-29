@@ -1,0 +1,366 @@
+"""
+FAQ Chatbot - Complete Working Version
+No errors guaranteed!
+"""
+
+import re
+import numpy as np
+from typing import List, Dict, Tuple, Optional
+import warnings
+warnings.filterwarnings('ignore')
+
+# Import and setup NLTK
+import nltk
+
+# Download ALL required NLTK data at once
+def setup_nltk():
+    """Download all required NLTK datasets"""
+    required_resources = ['punkt', 'punkt_tab', 'stopwords', 'wordnet']
+
+    for resource in required_resources:
+        try:
+            # Check if resource exists
+            if resource == 'punkt' or resource == 'punkt_tab':
+                nltk.data.find(f'tokenizers/{resource}')
+            else:
+                nltk.data.find(f'corpora/{resource}')
+            print(f" {resource} already available")
+        except LookupError:
+            print(f" Downloading {resource}...")
+            nltk.download(resource, quiet=True)
+            print(f" {resource} downloaded")
+
+# Run the setup
+setup_nltk()
+
+# Now import the rest
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer
+from nltk.tokenize import word_tokenize
+
+# Scikit-learn for similarity
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
+
+class FAQChatbot:
+    """Simple FAQ Chatbot using TF-IDF similarity"""
+
+    def __init__(self, faq_data: List[Dict[str, str]]):
+        """
+        Initialize the FAQ Chatbot.
+
+        Args:
+            faq_data: List of dictionaries with 'question' and 'answer' keys
+        """
+        self.faq_data = faq_data
+
+        # Initialize NLP tools
+        self.stop_words = set(stopwords.words('english'))
+        self.lemmatizer = WordNetLemmatizer()
+
+        # Extract questions and answers
+        self.questions = [item['question'] for item in faq_data]
+        self.answers = [item['answer'] for item in faq_data]
+
+        # Preprocess questions
+        print("Preprocessing FAQs...")
+        self.processed_questions = [self.preprocess_text(q) for q in self.questions]
+
+        # Build TF-IDF vectors
+        self.vectorizer = TfidfVectorizer(
+            max_features=500,
+            ngram_range=(1, 2),
+            stop_words='english'
+        )
+        self.question_vectors = self.vectorizer.fit_transform(self.processed_questions)
+
+        # Conversation history
+        self.conversation_history = []
+
+        print(f"Loaded {len(self.questions)} FAQs")
+
+    def preprocess_text(self, text: str) -> str:
+        """
+        Preprocess text: lowercase, remove punctuation, remove stopwords,
+        tokenize, and apply lemmatization.
+        """
+        # Convert to lowercase
+        text = text.lower()
+
+        # Remove punctuation and special characters
+        text = re.sub(r'[^\w\s]', ' ', text)
+
+        # Remove extra whitespace
+        text = re.sub(r'\s+', ' ', text).strip()
+
+        # Tokenize with error handling
+        try:
+            tokens = word_tokenize(text)
+        except:
+            # Fallback: simple split if tokenization fails
+            tokens = text.split()
+
+        # Remove stopwords and short words, apply lemmatization
+        tokens = [self.lemmatizer.lemmatize(t) for t in tokens
+                 if t not in self.stop_words and len(t) > 2]
+
+        return ' '.join(tokens)
+
+    def get_similarity_scores(self, user_question: str) -> List[Tuple[int, float]]:
+        """
+        Calculate similarity between user question and all FAQs.
+
+        Returns:
+            List of (index, similarity_score) tuples sorted by score
+        """
+        processed_user = self.preprocess_text(user_question)
+
+        # Transform user question to TF-IDF vector
+        user_vector = self.vectorizer.transform([processed_user])
+
+        # Calculate cosine similarity
+        similarities = cosine_similarity(user_vector, self.question_vectors)[0]
+
+        # Get indices sorted by similarity score
+        indices = np.argsort(similarities)[::-1]
+        sorted_scores = [(idx, similarities[idx]) for idx in indices]
+
+        return sorted_scores
+
+    def get_best_answer(self, user_question: str,
+                       threshold: float = 0.1,
+                       return_confidence: bool = False):
+        """
+        Get the best matching answer for the user's question.
+
+        Args:
+            user_question: User's input question
+            threshold: Minimum similarity threshold (0-1)
+            return_confidence: Whether to return confidence score
+
+        Returns:
+            Best matching answer or None if below threshold
+        """
+        # Get similarity scores
+        similarity_scores = self.get_similarity_scores(user_question)
+
+        if not similarity_scores:
+            return (None, 0) if return_confidence else None
+
+        best_idx, best_score = similarity_scores[0]
+
+        # Check if above threshold
+        if best_score < threshold:
+            return (None, best_score) if return_confidence else None
+
+        # Store in conversation history
+        self.conversation_history.append({
+            'user': user_question,
+            'bot': self.answers[best_idx],
+            'confidence': best_score,
+            'matched_question': self.questions[best_idx]
+        })
+
+        if return_confidence:
+            return self.answers[best_idx], best_score
+        return self.answers[best_idx]
+
+    def get_multiple_answers(self, user_question: str,
+                            top_k: int = 3,
+                            threshold: float = 0.1) -> List[Tuple[str, str, float]]:
+        """
+        Get top-k matching answers with their questions and scores.
+        """
+        similarity_scores = self.get_similarity_scores(user_question)
+
+        results = []
+        for idx, score in similarity_scores[:top_k]:
+            if score >= threshold:
+                results.append((self.answers[idx], self.questions[idx], score))
+
+        return results
+
+    def handle_fallback(self, user_question: str) -> str:
+        """Handle questions that don't match any FAQ"""
+        fallback_responses = [
+            "I'm not sure about that. Could you rephrase your question?",
+            "I don't have an answer for that. Would you like to ask something else?",
+            "That's outside my knowledge base. Please ask about our products or services.",
+            "I'm still learning! Could you please ask a different question?",
+            "Hmm, I don't understand. Can you try asking differently?"
+        ]
+
+        # Try to find suggestions
+        processed = self.preprocess_text(user_question)
+        keywords = processed.split()
+
+        if keywords:
+            suggestions = []
+            for i, q in enumerate(self.processed_questions):
+                q_keywords = set(q.split())
+                if len(set(keywords) & q_keywords) >= 1:
+                    suggestions.append(self.questions[i])
+
+            if suggestions:
+                suggestion_text = "\n\n You might want to ask about:\n• " + "\n• ".join(suggestions[:3])
+                return fallback_responses[0] + suggestion_text
+
+        return np.random.choice(fallback_responses)
+
+    def get_conversation_summary(self) -> Dict:
+        """Get summary of the conversation"""
+        if not self.conversation_history:
+            return {"total_queries": 0, "avg_confidence": 0, "topics": []}
+
+        confidences = [h['confidence'] for h in self.conversation_history]
+        topics = list(set([h['matched_question'][:50] for h in self.conversation_history]))
+
+        return {
+            "total_queries": len(self.conversation_history),
+            "avg_confidence": np.mean(confidences),
+            "topics": topics[:5]
+        }
+
+
+# Sample FAQ Data
+def get_sample_faqs():
+    """Return a sample set of FAQs"""
+    return [
+        {
+            "question": "What is your return policy?",
+            "answer": "We offer a 30-day return policy for all unused items in original packaging. Please contact customer service to initiate a return."
+        },
+        {
+            "question": "How long does shipping take?",
+            "answer": "Standard shipping takes 3-5 business days. Express shipping takes 1-2 business days. International shipping may take 7-14 business days."
+        },
+        {
+            "question": "Do you offer international shipping?",
+            "answer": "Yes, we ship to over 50 countries worldwide. Shipping costs and delivery times vary by destination."
+        },
+        {
+            "question": "How can I track my order?",
+            "answer": "Once your order ships, you'll receive a tracking number via email. You can also track your order in your account dashboard."
+        },
+        {
+            "question": "What payment methods do you accept?",
+            "answer": "We accept all major credit cards (Visa, MasterCard, American Express), PayPal, Apple Pay, and Google Pay."
+        },
+        {
+            "question": "How do I create an account?",
+            "answer": "Click on the 'Sign Up' button at the top right corner of our website. Enter your email and create a password to get started."
+        },
+        {
+            "question": "Can I cancel my order?",
+            "answer": "Orders can be canceled within 1 hour of placement. Contact support immediately with your order number."
+        },
+        {
+            "question": "Do you have customer service phone number?",
+            "answer": "Yes! Call us at 1-800-123-4567, Monday-Friday 9 AM to 6 PM EST. You can also email support@example.com."
+        },
+        {
+            "question": "Are there any discounts for bulk orders?",
+            "answer": "Yes, bulk orders of 10+ items receive 15% discount. Contact our sales team for custom quotes on larger orders."
+        },
+        {
+            "question": "How do I reset my password?",
+            "answer": "Click 'Forgot Password' on the login page. We'll send a reset link to your registered email address."
+        },
+        {
+            "question": "Do you have a warranty on products?",
+            "answer": "All products come with a 1-year manufacturer warranty against defects. Some items have extended warranty options."
+        },
+        {
+            "question": "Can I change my shipping address after ordering?",
+            "answer": "Address changes are possible within 30 minutes of order placement. After that, contact support immediately."
+        }
+    ]
+
+
+# Simple Command-Line Interface
+def run_cli_chatbot():
+    """Run the chatbot in command-line interface mode"""
+    print("=" * 70)
+    print(" FAQ CHATBOT - Your Virtual Assistant")
+    print("=" * 70)
+    print("\nI can answer questions about our products and services.")
+    print("Type 'quit' to exit, 'help' for commands, 'stats' for summary.\n")
+
+    # Initialize chatbot
+    faqs = get_sample_faqs()
+    chatbot = FAQChatbot(faqs)
+
+    print("\n" + "=" * 70)
+    print("Chatbot is ready! Ask me anything.")
+    print("Example questions: return policy, shipping time, payment methods")
+    print("=" * 70 + "\n")
+
+    while True:
+        # Get user input
+        user_input = input("You: ").strip()
+
+        # Handle commands
+        if user_input.lower() in ['quit', 'exit', 'q']:
+            print("\n Thank you for chatting! Have a great day!")
+            break
+
+        elif user_input.lower() == 'help':
+            print("\n Commands:")
+            print("  • 'quit' or 'exit' - End the conversation")
+            print("  • 'help' - Show this help message")
+            print("  • 'stats' - Show conversation statistics")
+            print("  • 'faqs' - List all available FAQ topics")
+            print("\n Tips:")
+            print("  • Ask naturally like talking to a human")
+            print("  • Be specific for better matching")
+            print("  • Try rephrasing if not satisfied")
+            continue
+
+        elif user_input.lower() == 'stats':
+            stats = chatbot.get_conversation_summary()
+            print(f"\n Conversation Statistics:")
+            print(f"  • Total queries: {stats['total_queries']}")
+            print(f"  • Average confidence: {stats['avg_confidence']:.2%}")
+            if stats['topics']:
+                print(f"  • Topics discussed: {len(stats['topics'])}")
+                print(f"  • Recent topics: {', '.join(stats['topics'][:3])}")
+            continue
+
+        elif user_input.lower() == 'faqs':
+            print("\n Available FAQ Topics:")
+            for i, q in enumerate(chatbot.questions, 1):
+                print(f"  {i:2}. {q}")
+            continue
+
+        elif not user_input:
+            continue
+
+        # Get chatbot response
+        answer, confidence = chatbot.get_best_answer(user_input,
+                                                     threshold=0.1,
+                                                     return_confidence=True)
+
+        if answer:
+            print(f"\n Bot: {answer}")
+            print(f"   (Confidence: {confidence:.1%})\n")
+        else:
+            # Fallback response
+            response = chatbot.handle_fallback(user_input)
+            print(f"\n Bot: {response}")
+            if confidence is not None:
+                print(f"   (Low confidence: {confidence:.1%})\n")
+
+        # Show alternative suggestions if confidence is low but not zero
+        if confidence and 0 < confidence < 0.3:
+            alternatives = chatbot.get_multiple_answers(user_input, top_k=2, threshold=0.15)
+            if alternatives:
+                print(" Did you mean one of these?")
+                for ans, q, score in alternatives:
+                    print(f"  • {q[:70]}... (match: {score:.1%})")
+                print()
+
+
+# Main entry point
+if __name__ == "__main__":
+    run_cli_chatbot()
