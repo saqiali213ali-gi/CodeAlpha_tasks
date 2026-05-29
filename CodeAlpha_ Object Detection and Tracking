@@ -1,0 +1,279 @@
+
+import argparse
+import cv2
+import numpy as np
+from ultralytics import YOLO
+
+# Try to import DeepSort with error handling
+try:
+    from deep_sort_realtime.deepsort_tracker import DeepSort
+    DEEPSORT_AVAILABLE = True
+except ImportError:
+    DEEPSORT_AVAILABLE = False
+    print("Warning: deep-sort-realtime not installed. Install with: pip install deep-sort-realtime")
+
+
+YOLO_MODEL      = "yolov8n.pt"      # nano model — change to yolov8s.pt / yolov8m.pt for more accuracy
+CONF_THRESHOLD  = 0.5               # minimum detection confidence
+IOU_THRESHOLD   = 0.45              # NMS IoU threshold
+MAX_AGE         = 30                # DeepSORT: frames to keep a lost track alive
+MAX_IOU_DIST    = 0.7               # DeepSORT: max IoU distance for association
+
+# Colour palette — one colour per class index (cycles if > 80 classes)
+PALETTE = [
+    (255, 56,  56),  (255, 157, 151), (255, 112,  31), (255, 178, 29),
+    (207, 210,  49), (72,  249, 10),  (146, 204,  23), (61,  219, 134),
+    (26,  147, 52),  (0,   212, 187), (44,  153, 168), (0,   194, 255),
+    (52,  69,  147), (100, 115, 255), (0,   24,  236), (132,  56, 255),
+    (82,   0, 133),  (203,  56, 255), (255,  14, 207), (255,  15, 110),
+]
+
+
+def get_color(class_id: int) -> tuple:
+    return PALETTE[class_id % len(PALETTE)]
+
+
+def draw_box(frame, x1, y1, x2, y2, track_id, class_name, conf, color):
+
+    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+
+    label = f"ID:{track_id} {class_name} {conf:.0%}"
+    (tw, th), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)
+    # Label background
+    cv2.rectangle(frame, (x1, y1 - th - baseline - 6), (x1 + tw + 4, y1), color, -1)
+    cv2.putText(
+        frame, label,
+        (x1 + 2, y1 - baseline - 2),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+        (255, 255, 255), 1, cv2.LINE_AA,
+    )
+
+
+def draw_hud(frame, frame_idx, fps, total_tracks):
+
+    h, w = frame.shape[:2]
+    # Semi-transparent background
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (0, 0), (240, 68), (0, 0, 0), -1)
+    cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
+
+    cv2.putText(frame, f"FPS: {fps:.1f}",            (8, 22),  cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
+    cv2.putText(frame, f"Frame: {frame_idx}",         (8, 44),  cv2.FONT_HERSHEY_SIMPLEX, 0.60, (200, 200, 200), 1)
+    cv2.putText(frame, f"Tracks: {total_tracks}",     (8, 64),  cv2.FONT_HERSHEY_SIMPLEX, 0.60, (200, 200, 200), 1)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="YOLOv8 + DeepSORT object tracking")
+    parser.add_argument("--source", default="0",
+                        help="Webcam index (0) or path to video file")
+    parser.add_argument("--model",  default=YOLO_MODEL,
+                        help=f"YOLOv8 model weights (default: {YOLO_MODEL})")
+    parser.add_argument("--conf",   type=float, default=CONF_THRESHOLD,
+                        help=f"Detection confidence threshold (default: {CONF_THRESHOLD})")
+    parser.add_argument("--iou",    type=float, default=IOU_THRESHOLD,
+                        help=f"NMS IoU threshold (default: {IOU_THRESHOLD})")
+    parser.add_argument("--save",   default="",
+                        help="Path to save output video (e.g. output.mp4); empty = no save")
+    parser.add_argument("--no-display", action="store_true",
+                        help="Disable live window (useful for headless/server runs)")
+    parser.add_argument("--no-track", action="store_true",
+                        help="Disable tracking (only show detections)")
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+
+
+    try:
+        source = int(args.source) if args.source.isdigit() else args.source
+        cap = cv2.VideoCapture(source)
+        if not cap.isOpened():
+            raise RuntimeError(f"Cannot open video source: {args.source!r}")
+    except ValueError:
+        cap = cv2.VideoCapture(args.source)
+        if not cap.isOpened():
+            raise RuntimeError(f"Cannot open video source: {args.source!r}")
+
+    frame_w  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    frame_h  = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    src_fps  = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    print(f"[INFO] Source: {args.source}  |  {frame_w}×{frame_h}  @  {src_fps:.1f} fps")
+
+
+    writer = None
+    if args.save:
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(args.save, fourcc, src_fps, (frame_w, frame_h))
+        print(f"[INFO] Saving output to: {args.save}")
+
+
+    print(f"[INFO] Loading model: {args.model}")
+    try:
+        model = YOLO(args.model)
+        class_names = model.names   # {0: 'person', 1: 'bicycle', ...}
+        print(f"[INFO] Model loaded. Classes: {len(class_names)}")
+        # Print first 10 classes to verify
+        for i in range(min(10, len(class_names))):
+            print(f"  {i}: {class_names[i]}")
+    except Exception as e:
+        print(f"[ERROR] Failed to load model: {e}")
+        return
+
+
+    tracker = None
+    if not args.no_track and DEEPSORT_AVAILABLE:
+        try:
+            tracker = DeepSort(
+                max_age=MAX_AGE,
+                max_iou_distance=MAX_IOU_DIST,
+                embedder="mobilenet",
+                half=False,          # Use FP32 for better compatibility
+                bgr=True,           # frames come in BGR (OpenCV default)
+                nn_budget=None,
+            )
+            print("[INFO] DeepSORT tracker initialized")
+        except Exception as e:
+            print(f"[WARNING] Failed to initialize DeepSORT: {e}")
+            print("[INFO] Running in detection-only mode")
+            tracker = None
+    else:
+        if args.no_track:
+            print("[INFO] Tracking disabled (--no-track)")
+        elif not DEEPSORT_AVAILABLE:
+            print("[INFO] Running in detection-only mode (DeepSORT not available)")
+
+
+    frame_idx = 0
+    fps_timer = cv2.TickMeter()
+    fps_timer.start()
+    display_fps = 0.0
+
+    print("[INFO] Running — press Q to quit")
+    print("[INFO] Controls:")
+    print("  Q/Esc - Quit")
+    print("  D     - Toggle detection debug info")
+
+    debug_mode = False
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("[INFO] Stream ended or frame grab failed.")
+            break
+
+        frame_idx += 1
+
+
+        try:
+            results = model.predict(
+                frame,
+                conf=args.conf,
+                iou=args.iou,
+                verbose=False,
+                device="cpu",  # Use CPU for stability
+            )[0]
+        except Exception as e:
+            print(f"[ERROR] Detection failed: {e}")
+            break
+
+        # Build detection list for DeepSORT:  [[x, y, w, h], conf, class_id]
+        detections = []
+        for box in results.boxes:
+            x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+            conf    = float(box.conf[0])
+            cls_id  = int(box.cls[0])
+            w, h    = x2 - x1, y2 - y1
+
+            # Only track detections above threshold
+            if conf >= args.conf:
+                detections.append(([x1, y1, w, h], conf, cls_id))
+
+                # Debug: print detection info
+                if debug_mode and conf > 0.3:
+                    class_name = class_names.get(cls_id, str(cls_id))
+                    print(f"Detected: {class_name} at ({x1},{y1}) conf={conf:.2f}")
+
+
+        active_tracks = 0
+
+        if tracker is not None and detections:
+            try:
+                # Update tracker with detections
+                tracks = tracker.update_tracks(detections, frame=frame)
+
+                # Draw tracked objects
+                for track in tracks:
+                    if not track.is_confirmed():
+                        continue
+                    active_tracks += 1
+
+                    track_id  = track.track_id
+                    ltrb      = track.to_ltrb()                         # [left, top, right, bottom]
+                    x1, y1, x2, y2 = map(int, ltrb)
+                    cls_id    = track.det_class if track.det_class is not None else 0
+                    conf      = track.det_conf if track.det_conf is not None else 0.0
+                    cls_name  = class_names.get(cls_id, f"class_{cls_id}")
+                    color     = get_color(cls_id)
+
+                    draw_box(frame, x1, y1, x2, y2, track_id, cls_name, conf, color)
+
+            except Exception as e:
+                print(f"[ERROR] Tracking failed: {e}")
+                # Fall back to detection-only
+                tracker = None
+
+        # Fallback: draw raw detections if tracking is disabled/failed
+        if tracker is None:
+            for det in detections:
+                (x, y, w, h), conf, cls_id = det
+                x1, y1, x2, y2 = x, y, x+w, y+h
+                cls_name = class_names.get(cls_id, f"class_{cls_id}")
+                color = get_color(cls_id)
+                # Draw without tracking ID
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                label = f"{cls_name} {conf:.0%}"
+                (tw, th), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)
+                cv2.rectangle(frame, (x1, y1 - th - baseline - 6), (x1 + tw + 4, y1), color, -1)
+                cv2.putText(frame, label, (x1 + 2, y1 - baseline - 2),
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
+                active_tracks = len(detections)
+
+
+        fps_timer.stop()
+        elapsed = fps_timer.getTimeSec()
+        if elapsed > 0:
+            display_fps = 1.0 / elapsed
+        fps_timer.reset()
+        fps_timer.start()
+
+        draw_hud(frame, frame_idx, display_fps, active_tracks)
+
+
+        mode_text = "Tracking Mode" if tracker else "Detection Only"
+        cv2.putText(frame, mode_text, (frame_w - 150, 30),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+
+
+        if not args.no_display:
+            cv2.imshow("YOLOv8 + DeepSORT Tracking", frame)
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord("q") or key == 27:   # Q or Esc
+                print("[INFO] Quit requested.")
+                break
+            elif key == ord("d"):  # Toggle debug mode
+                debug_mode = not debug_mode
+                print(f"[INFO] Debug mode: {'ON' if debug_mode else 'OFF'}")
+
+        if writer:
+            writer.write(frame)
+
+    cap.release()
+    if writer:
+        writer.release()
+    cv2.destroyAllWindows()
+    print(f"[INFO] Done. Processed {frame_idx} frames.")
+
+
+if __name__ == "__main__":
+    main()
